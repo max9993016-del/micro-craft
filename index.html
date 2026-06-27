@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>手機網頁版微型我的世界</title>
+    <style>
+        body {
+            margin: 0;
+            background-color: #87CEEB;
+            color: #333;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+            height: 100vh;
+            overflow: hidden;
+            position: relative;
+            /* 防止手機長按彈出選單或反白 */
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+        #ui-container {
+            margin-top: 10px;
+            margin-bottom: 5px;
+            text-align: center;
+            z-index: 10;
+        }
+        h2 {
+            margin: 5px 0;
+            font-size: 1.2rem;
+        }
+        canvas {
+            background-color: #87CEEB;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+            border-radius: 4px;
+            touch-action: none; /* 禁用瀏覽器預設的手勢（如滑動重整） */
+            max-width: 95vw;
+            max-height: 60vh;
+        }
+        
+        /* 手機版工具列：放在螢幕中下方方便大拇指點擊 */
+        .controls-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 12px;
+            margin-top: 15px;
+            width: 100%;
+            z-index: 10;
+        }
+
+        /* 模式切換鈕 (建造 / 挖掘) */
+        .mode-toggle {
+            display: flex;
+            background: rgba(0, 0, 0, 0.4);
+            padding: 4px;
+            border-radius: 30px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+        }
+        .mode-btn {
+            padding: 8px 20px;
+            border: none;
+            background: transparent;
+            color: #ccc;
+            font-size: 14px;
+            font-weight: bold;
+            border-radius: 20px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .mode-btn.active {
+            background: #fff;
+            color: #333;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+
+        /* 放大快捷欄，方便手指觸控 */
+        .hotbar {
+            display: flex;
+            gap: 8px;
+        }
+        .slot {
+            width: 50px;
+            height: 50px;
+            border: 3px solid #555;
+            background: #999;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: white;
+            text-shadow: 1px 1px 2px #000;
+            cursor: pointer;
+            border-radius: 8px;
+            font-size: 16px;
+        }
+        .slot.active {
+            border-color: #fff;
+            box-shadow: 0 0 12px #fff;
+            background: #bbb;
+        }
+        .instructions {
+            font-size: 12px;
+            background: rgba(255,255,255,0.8);
+            padding: 6px 12px;
+            border-radius: 20px;
+            margin-top: 5px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui-container">
+        <h2>MineCraft 網頁 3D 手機版</h2>
+    </div>
+
+    <canvas id="gameCanvas" width="600" height="450"></canvas>
+
+    <div class="controls-container">
+        <div class="mode-toggle">
+            <button class="mode-btn active" id="btn-build" onclick="setMode('build')">⚒️ 建造模式</button>
+            <button class="mode-btn" id="btn-dig" onclick="setMode('dig')">⛏️ 挖掘模式</button>
+        </div>
+
+        <div class="hotbar">
+            <div class="slot active" id="slot-1" onclick="selectBlock(1)">草</div>
+            <div class="slot" id="slot-2" onclick="selectBlock(2)">土</div>
+            <div class="slot" id="slot-3" onclick="selectBlock(3)">石</div>
+            <div class="slot" id="slot-4" onclick="selectBlock(4)">木</div>
+        </div>
+
+        <div class="instructions">
+            👉 <b>單指拖曳</b>：移動視角 | 🎯 <b>點擊方塊</b>：執行建造/挖掘
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById("gameCanvas");
+        const ctx = canvas.getContext("2d");
+
+        // 地圖設定
+        const mapSize = 10; 
+        const tileWidth = 50;  // 稍微縮小方塊以適應手機螢幕
+        const tileHeight = 25;
+        const blockHeight = 25;
+
+        // 視角偏移（可用手指拖曳移動）
+        let offsetX = canvas.width / 2;
+        let offsetY = canvas.height / 4;
+
+        // 操作模式：'build' (建造) 或 'dig' (挖掘)
+        let currentMode = 'build';
+        let currentBlockType = 1;
+
+        // 地圖數據
+        let world = {};
+        for (let x = 0; x < mapSize; x++) {
+            for (let y = 0; y < mapSize; y++) {
+                world[`${x},${y},0`] = 3;
+                world[`${x},${y},1`] = 2;
+                world[`${x},${y},2`] = 1;
+            }
+        }
+
+        const colors = {
+            1: { top: "#567d46", left: "#4d703f", right: "#415e35" },
+            2: { top: "#866043", left: "#75543a", right: "#634731" },
+            3: { top: "#8a8a8a", left: "#7a7a7a", right: "#696969" },
+            4: { top: "#b58f55", left: "#9c7b4a", right: "#85693f" }
+        };
+
+        // --- 手機觸控互動邏輯 ---
+        let touchStartX = 0;
+        let touchStartY = 0;
+        let isDragging = false;
+        let hasMoved = false; // 用來區分使用者是在「拖曳視角」還是「輕點放方塊」
+
+        // 觸控開始
+        canvas.addEventListener("touchstart", (e) => {
+            if (e.touches.length === 1) {
+                const touch = e.touches[0];
+                touchStartX = touch.clientX;
+                touchStartY = touch.clientY;
+                isDragging = true;
+                hasMoved = false;
+            }
+        }, { passive: true });
+
+        // 觸控移動（拖曳視角）
+        canvas.addEventListener("touchmove", (e) => {
+            if (!isDragging || e.touches.length !== 1) return;
+            const touch = e.touches[0];
+            
+            let deltaX = touch.clientX - touchStartX;
+            let deltaY = touch.clientY - touchStartY;
+
+            // 如果移動距離超過 5 像素，判定為「拖曳視角」而非「點擊」
+            if (Math.abs(deltaX) > 5 || Math.abs(deltaY) > 5) {
+                hasMoved = true;
+                offsetX += deltaX;
+                offsetY += deltaY;
+                
+                // 更新基準點，讓拖曳更平滑
+                touchStartX = touch.clientX;
+                touchStartY = touch.clientY;
+                
+                drawWorld();
+            }
+        }, { passive: true });
+
+        // 觸控結束
+        canvas.addEventListener("touchend", (e) => {
+            isDragging = false;
+            
+            // 如果手指只是輕點（沒有大範圍拖曳），就觸發方塊點擊事件
+            if (!hasMoved) {
+                // 獲取最後離開時的觸控點座標（相對於 Canvas）
+                const rect = canvas.getBoundingClientRect();
+                // 讀取觸控點，若 touchend 中沒有 touches，則讀取 changedTouches
+                const touch = e.changedTouches[0];
+                
+                // 由於 CSS 限制了 canvas 的 max-width/height，需要做座標比例換算
+                const mouseX = (touch.clientX - rect.left) * (canvas.width / rect.width);
+                const mouseY = (touch.clientY - rect.top) * (canvas.height / rect.height);
+                
+                handleBlockClick(mouseX, mouseY);
+            }
+        });
+
+        // 處理方塊點擊的實作
+        function handleBlockClick(mx, my) {
+            let clickedBlock = null;
+
+            // 完美的由上而下、由前而後的方塊點擊偵測
+            for (let z = 15; z >= 0; z--) {
+                for (let sum = (mapSize - 1) * 2; sum >= 0; sum--) {
+                    for (let x = mapSize - 1; x >= 0; x--) {
+                        let y = sum - x;
+                        if (y >= 0 && y < mapSize) {
+                            if (world[`${x},${y},z`]) {
+                                let hitResult = getPointIntersection(mx, my, x, y, z);
+                                if (hitResult.hit) {
+                                    clickedBlock = { x, y, z, face: hitResult.face };
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if (clickedBlock) break;
+                }
+                if (clickedBlock) break;
+            }
+
+            if (clickedBlock) {
+                if (currentMode === 'build') { // 建造模式
+                    let nx = clickedBlock.x;
+                    let ny = clickedBlock.y;
+                    let nz = clickedBlock.z;
+
+                    if (clickedBlock.face === 'top') nz++;
+                    else if (clickedBlock.face === 'left') ny++;
+                    else if (clickedBlock.face === 'right') nx++;
+
+                    if (nz < 16 && nx >= 0 && nx < mapSize && ny >= 0 && ny < mapSize) {
+                        world[`${nx},${ny},${nz}`] = currentBlockType;
+                    }
+                } else if (currentMode === 'dig') { // 挖掘模式
+                    delete world[`${clickedBlock.x},${clickedBlock.y},${clickedBlock.z}`];
+                }
+                drawWorld();
+            }
+        }
+
+        // 測試觸控點落在哪個方塊表面
+        function getPointIntersection(mx, my, x, y, z) {
+            let screenX = offsetX + (x - y) * tileWidth / 2;
+            let screenY = offsetY + (x + y) * tileHeight / 2 - (z * blockHeight);
+
+            ctx.beginPath();
+            ctx.moveTo(screenX, screenY - blockHeight);
+            ctx.lineTo(screenX + tileWidth / 2, screenY - blockHeight + tileHeight / 2);
+            ctx.lineTo(screenX, screenY - blockHeight + tileHeight);
+            ctx.lineTo(screenX - tileWidth / 2, screenY - blockHeight + tileHeight / 2);
+            ctx.closePath();
+            if (ctx.isPointInPath(mx, my)) return { hit: true, face: 'top' };
+
+            ctx.beginPath();
+            ctx.moveTo(screenX - tileWidth / 2, screenY - blockHeight + tileHeight / 2);
+            ctx.lineTo(screenX, screenY - blockHeight + tileHeight);
+            ctx.lineTo(screenX, screenY + tileHeight);
+            ctx.lineTo(screenX - tileWidth / 2, screenY + tileHeight / 2);
+     
